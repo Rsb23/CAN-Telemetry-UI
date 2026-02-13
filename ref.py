@@ -1,18 +1,15 @@
 
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, 
                              QVBoxLayout, QHBoxLayout, QComboBox, 
                              QPushButton, QTextEdit, QLabel)
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
+from PyQt6.QtCore import QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtSerialPort import QSerialPort, QSerialPortInfo
 from typing import Optional
 from queue import Queue
 import sys
 
 
 class SerialThread(QThread):
-    """
-    A thread class for handling serial port operations.
-    """
     received_data = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
@@ -24,12 +21,10 @@ class SerialThread(QThread):
         self.write_queue: Queue = Queue()
 
     def setup_port(self, port_name: str, baud_rate: int, 
-                   data_bits: int, parity: QSerialPort.Parity,
+                   data_bits: QSerialPort.DataBits, parity: QSerialPort.Parity,
                    stop_bits: QSerialPort.StopBits, 
                    flow_control: QSerialPort.FlowControl) -> None:
-        """
-        Set up the serial port with the given parameters.
-        """
+
         self.serial_port.setPortName(port_name)
         self.serial_port.setBaudRate(baud_rate)
         self.serial_port.setDataBits(data_bits)
@@ -38,11 +33,7 @@ class SerialThread(QThread):
         self.serial_port.setFlowControl(flow_control)
 
     def run(self) -> None:
-        """
-        The main loop of the thread for reading data from the serial 
-        port and writing queued data.
-        """
-        if not self.serial_port.open(QSerialPort.ReadWrite):
+        if not self.serial_port.open(QSerialPort.OpenModeFlag.ReadWrite):
             self.error_occurred.emit(
                 f"Failed to open port: {self.serial_port.errorString()}")
             return
@@ -50,13 +41,11 @@ class SerialThread(QThread):
         self.is_running = True
 
         while self.is_running:
-            # Handle writing
             while not self.write_queue.empty():
                 data = self.write_queue.get()
                 self.serial_port.write(data)
                 self.serial_port.flush()
 
-            # Handle reading
             if self.serial_port.waitForReadyRead(100):
                 data = self.serial_port.readAll().data().decode()
                 self.received_data.emit(data)
@@ -64,44 +53,36 @@ class SerialThread(QThread):
         self.serial_port.close()
 
     def stop(self) -> None:
-        """
-        Stop the thread and close the serial port.
-        """
         self.is_running = False
         self.quit()
         self.wait()
 
     def write_data(self, data: str) -> None:
-        """
-        Queue data to be written to the serial port.
-        """
         if self.serial_port.isOpen():
             self.write_queue.put(data.encode())
         else:
             self.error_occurred.emit("Serial port is not open")
 
 
-
 class SerialPortGUI(QMainWindow):
-    """
-    The main GUI class for the serial port communication application.
-    """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Serial Port Communication")
-        self.setGeometry(100, 100, 600, 400)
 
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.layout = QVBoxLayout(self.central_widget)
-
-        self.setup_ui()
+        self.setupWindowAttributes()
+        self.setupUI()
         
         self.serial_thread = SerialThread(self)
         self.serial_thread.received_data.connect(self.update_received_data)
         self.serial_thread.error_occurred.connect(self.show_error)
+    
+    def setupWindowAttributes(self):
+        self.setWindowTitle("Serial Port Communication")
+        self.setGeometry(100, 100, 600, 400)
 
-    def setup_ui(self) -> None:
+    def setupUI(self) -> None:
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
 
         self.port_combo = QComboBox()
         self.port_combo.setFixedWidth(80)
@@ -114,8 +95,14 @@ class SerialPortGUI(QMainWindow):
 
         self.data_bits_combo = QComboBox()
         self.data_bits_combo.setFixedWidth(80)
-        self.data_bits_combo.addItems(["5", "6", "7", "8"])
-        self.data_bits_combo.setCurrentText("8")
+        databits = [
+            ('5', QSerialPort.DataBits.Data5),
+            ('6', QSerialPort.DataBits.Data6),
+            ('7', QSerialPort.DataBits.Data7),
+            ('8', QSerialPort.DataBits.Data8)
+        ]
+        for text, databit in databits:
+            self.data_bits_combo.addItem(text, databit)
 
         self.parity_combo = QComboBox()
         self.parity_combo.setFixedWidth(80)
@@ -198,21 +185,15 @@ class SerialPortGUI(QMainWindow):
         self.setFixedSize(400, 500)
     
     def refresh_ports(self) -> None:
-        """
-        Refresh the list of available serial ports.
-        """
         self.port_combo.clear()
         for port in QSerialPortInfo.availablePorts():
             self.port_combo.addItem(port.portName())
 
     @pyqtSlot()
     def connect_serial(self) -> None:
-        """
-        Connect to the selected serial port with the chosen settings.
-        """
         port_name = self.port_combo.currentText()
         baud_rate = int(self.baud_combo.currentText())
-        data_bits = int(self.data_bits_combo.currentText())
+        data_bits = self.data_bits_combo.currentData()
         parity = QSerialPort.Parity(self.parity_combo.currentIndex())
         stop_bits = QSerialPort.StopBits(self.stop_bits_combo.currentIndex())
         flow_control = QSerialPort.FlowControl(self.flow_control_combo.currentIndex())
@@ -226,46 +207,30 @@ class SerialPortGUI(QMainWindow):
 
     @pyqtSlot()
     def disconnect_serial(self) -> None:
-        """
-        Disconnect from the serial port.
-        """
         self.serial_thread.stop()
         self.connect_button.setEnabled(True)
         self.disconnect_button.setEnabled(False)
 
     @pyqtSlot()
     def send_data(self) -> None:
-        """
-        Send data type str through the serial port.
-        """
         data = self.send_input.toPlainText()               
         self.serial_thread.write_data(data)
-        # self.send_input.clear()        
 
     @pyqtSlot(str)
     def update_received_data(self, data: str) -> None:
-        """
-        Update the received data display with new data.
-        """
         self.received_display.append(data)
 
     @pyqtSlot(str)
     def show_error(self, error: str) -> None:
-        """
-        Display an error message.
-        """
         self.received_display.append(f"ERROR: {error}")
 
     def clear_data(self) -> None:
         self.received_display.clear()
 
-    # Overwrite method closeEvent from class QMainWindow.
     def closeEvent(self, event) -> None:
-        # Close the thread
         if self.serial_thread.isRunning():
             self.serial_thread.stop()
 
-        # Accept the event.
         event.accept()
 
 
@@ -273,4 +238,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = SerialPortGUI()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
